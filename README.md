@@ -14,19 +14,26 @@ menggambar, dan menyimpan layout di flash sehingga langsung tampil saat dinyalak
 ## 1. Kabel display
 
 Nomor pin diatur di [firmware/hwdisplay/config.h](firmware/hwdisplay/config.h).
-Bawaan:
+Bawaan untuk Waveshare RP2040-Zero dengan modul ST7789V 9 pin:
 
-| Pin display | Pico |
+| Pin display | RP2040-Zero |
 |---|---|
 | VCC | 3V3(OUT) |
 | GND | GND |
-| SCL / CLK | GP18 |
-| SDA / DIN | GP19 |
-| CS | GP17 |
-| DC | GP20 |
-| RES / RST | GP21 |
-| BLK / BL | GP22 |
-| SDO / MISO (pin ke-9) | tidak disambung |
+| SCL | GP2 |
+| SDA | GP3 |
+| RST | GP5 |
+| DC | GP6 |
+| CS | GP7 |
+| CS-TF | tidak disambung |
+| OUT | tidak disambung |
+
+GP4 dipakai bus SPI sebagai MISO walau tidak disambung, jadi jangan dipakai untuk
+keperluan lain.
+
+Modul ini tidak punya pin backlight, sehingga `PIN_TFT_BL` diisi `-1` dan backlight
+selalu menyala penuh. Akibatnya pengaturan **Kecerahan** dan **Padam bila tanpa data**
+di editor tidak berpengaruh pada layar.
 
 Bila kabel Anda berbeda, ubah `config.h`, bukan kabelnya. SCK dan MOSI harus memakai
 pin yang sah untuk bus SPI yang dipilih; daftarnya ada di komentar `config.h`.
@@ -40,9 +47,10 @@ pin yang sah untuk bus SPI yang dipilih; daftarnya ada di komentar `config.h`.
 3. **Library Manager**: pasang **Adafruit ST7735 and ST7789 Library**,
    **Adafruit GFX Library**, dan **ArduinoJson** (versi 7).
 4. Buka `firmware/hwdisplay/hwdisplay.ino`.
-5. **Tools → Board**: Raspberry Pi Pico. **Tools → Flash Size**: `2MB (Sketch: 1MB, FS: 1MB)`.
+5. **Tools → Board**: Waveshare RP2040 Zero (atau Raspberry Pi Pico bila memakai Pico
+   biasa). **Tools → Flash Size**: `2MB (Sketch: 1MB, FS: 1MB)`.
    Tanpa bagian FS, layout tidak bisa disimpan di Pico.
-6. Tahan tombol BOOTSEL saat mencolok Pico untuk upload pertama, lalu **Upload**.
+6. Tahan tombol BOOT saat mencolok papan untuk upload pertama, lalu **Upload**.
 
 Setelah upload, layar menampilkan layout bawaan dengan nilai `--` sampai program PC berjalan.
 
@@ -50,7 +58,7 @@ Setelah upload, layar menampilkan layout bawaan dengan nilai `--` sampai program
 |---|---|
 | Layar putih atau kosong | Periksa pin; untuk modul tanpa CS pakai `PIN_TFT_CS -1` dan `SPI_MODE3` |
 | Warna negatif | `TFT_INVERT_COLORS 1` |
-| Layar gelap | Periksa `PIN_TFT_BL` dan `TFT_BL_ACTIVE_HIGH` |
+| Layar gelap | Periksa `PIN_TFT_BL` dan `TFT_BL_ACTIVE_HIGH` (hanya modul dengan pin backlight) |
 
 ## 3. Program PC
 
@@ -175,13 +183,22 @@ program headless sebelum membuka editor:
    editor yang mengirim data ke Pico.
 3. Tutup editor, lalu jalankan headless lagi atau biarkan sampai login berikutnya.
 
-Bila editor dibuka saat headless masih berjalan:
+Bila editor dibuka saat headless masih berjalan, baris status di kiri atas editor
+berubah merah dan menampilkan salah satu atau kedua pesan berikut:
 
-- **Windows:** editor terus menampilkan "Mencari Pico…" dan perubahan layout tidak
-  sampai ke Pico. Tidak ada yang rusak; editor tersambung sendiri sekitar 2 detik
-  setelah headless dihentikan.
+| Pesan | Artinya |
+|---|---|
+| `Mode headless masih berjalan, hentikan dulu` | Ada proses `hwdisplay --headless` lain |
+| `Port COM3 sedang dipakai program lain` | Port Pico sedang dibuka program lain, headless atau bukan |
+
+Pesan hilang sendiri sekitar 2 detik setelah penyebabnya dihentikan. Selama pesan itu
+tampil:
+
+- **Windows:** editor tidak tersambung dan perubahan layout tidak sampai ke Pico.
+  Tidak ada yang rusak; editor tersambung sendiri setelah headless dihentikan.
 - **Linux:** kedua program bisa membuka port bersamaan dan saling mengganggu: tampilan
-  berganti-ganti dan muncul galat "Pico tidak menjawab".
+  berganti-ganti dan muncul galat "Pico tidak menjawab". Pesan port tidak muncul di
+  sini, hanya pesan mode headless.
 
 Program headless membaca `layout.json` hanya saat mulai, jadi layout baru dipakai
 setelah ia dijalankan ulang.
@@ -223,13 +240,34 @@ tidak bisa diubah di editor.
 
 Bila `PIN_BUTTON` di `config.h` diisi, tombol di pin itu memindah ke halaman berikutnya.
 
+### Splash saat menyala
+
+Saat Pico mendapat daya, layar menampilkan judul, versi firmware, dan batang progres
+sebelum halaman 1 muncul. Pengaturannya ada di panel **Tampilan** (butuh firmware 0.2.0
+atau lebih baru):
+
+| Kontrol | Fungsi |
+|---|---|
+| **Splash saat menyala (dtk)** | Lama splash, 0–10 detik; `0` = tanpa splash |
+| **Judul splash** | Tulisan besar di splash, paling banyak 24 huruf ASCII |
+| **Tes splash** | Menampilkan splash sekarang juga, lalu kembali ke halaman semula |
+
+Kedua nilai tersimpan otomatis di flash Pico begitu diubah, karena splash tampil
+sebelum PC tersambung. Perubahannya terlihat saat Pico dinyalakan berikutnya, atau
+langsung lewat **Tes splash**. Bila lamanya `0`, **Tes splash** tetap menampilkannya
+selama 1,5 detik.
+
+Splash memakai rotasi, warna latar, dan warna teks dari layout tersimpan. Selama
+splash tampil Pico tetap menerima pesan dari PC.
+
 ### Lokasi penyimpanan
 
 | Tempat | File | Isi |
 |---|---|---|
 | PC | `layout.json` | Layout yang sedang diedit; disimpan otomatis tiap ada perubahan |
-| PC | `settings.json` | Port, interval kirim, kecerahan, waktu padam, `gpu_index` |
-| Pico (flash) | `/layout.json`, `/config.json` | Salinan yang dipakai saat program PC tidak berjalan; ditulis oleh **Simpan ke Pico** |
+| PC | `settings.json` | Port, interval kirim, kecerahan, waktu padam, `gpu_index`, lama dan judul splash |
+| Pico (flash) | `/layout.json` | Salinan layout yang dipakai saat program PC tidak berjalan; ditulis oleh **Simpan ke Pico** |
+| Pico (flash) | `/config.json` | Kecerahan, waktu padam, lama dan judul splash; ditulis otomatis saat diubah |
 
 Folder di PC: `%APPDATA%\hwdisplay` (Windows) atau `~/.config/hwdisplay`
 (Linux). Menghapus `layout.json` mengembalikan editor ke layout bawaan.
@@ -249,6 +287,17 @@ Daftar metrik mengikuti hardware yang terdeteksi saat program dimulai;
 
 GPU dinomori menurut slot PCI, sehingga nomornya tetap sama antar-boot dan dua kartu
 bertipe sama tetap bisa dibedakan. Kipas dan daya tidak tersedia di sebagian GPU.
+
+Pembanding tiap angka di alat bawaan sistem:
+
+| Metrik | Windows | Linux |
+|---|---|---|
+| `cpu.load` | Sama dengan Task Manager (ikut menghitung kecepatan turbo) | Sama dengan `top` |
+| `vram_used` | Sama dengan "Dedicated GPU memory" di Task Manager | Sama dengan `nvidia-smi` |
+| `load` GPU | Sama dengan `nvidia-smi`; bisa sedikit lebih tinggi dari Task Manager, yang hanya menampilkan mesin GPU tersibuk | Sama dengan `nvidia-smi` |
+
+Task Manager menampilkan GPU Intel bawaan dan GPU NVIDIA sebagai panel terpisah;
+bandingkan dengan panel NVIDIA.
 
 ### Menambah GPU
 
@@ -274,8 +323,9 @@ USB CDC serial, satu objek JSON per baris.
 | `{"t":"hello"}` | `{"t":"hello","name":"hwdisplay","fw":…}` |
 | `{"t":"layout","layout":{…},"page":0,"save":true}` | `{"t":"ok","for":"layout","saved":true}` |
 | `{"t":"data","v":{"cpu.load":12.5,…}}` | tidak ada |
-| `{"t":"config","brightness":80,"sleep_s":60}` | `{"t":"ok","for":"config",…}` |
+| `{"t":"config","brightness":80,"sleep_s":60,"splash_ms":1500,"splash_title":"HWDisplay"}` | `{"t":"ok","for":"config",…}` |
 | `{"t":"page","n":1}` | `{"t":"ok","for":"page",…}` |
+| `{"t":"splash"}` | `{"t":"ok","for":"splash",…}`, lalu splash tampil |
 
 Kegagalan dijawab `{"t":"err","for":…,"msg":…}`. Tanpa data selama 5 detik semua nilai
 menjadi `--`; tanpa pesan selama `sleep_s` detik backlight dipadamkan.

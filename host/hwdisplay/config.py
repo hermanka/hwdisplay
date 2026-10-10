@@ -15,7 +15,26 @@ DEFAULT_SETTINGS = {
     "brightness": 80,   # persen
     "sleep_s": 60,      # layar padam setelah sekian detik tanpa data; 0 = tidak pernah
     "gpu_index": 0,
+    "splash_s": 1.5,    # lama splash saat Pico dinyalakan; 0 = tanpa splash
+    "splash_title": "HWDisplay",
 }
+
+# Batas splash harus sama dengan firmware/hwdisplay/hwdisplay.ino.
+SPLASH_MAX_S = 10.0
+SPLASH_TITLE_MAX = 24
+
+
+def clean_splash_s(value) -> float:
+    try:
+        return round(min(max(float(value), 0.0), SPLASH_MAX_S), 1)
+    except (TypeError, ValueError):
+        return DEFAULT_SETTINGS["splash_s"]
+
+
+def clean_splash_title(value) -> str:
+    # Font di Pico hanya berisi ASCII.
+    text = "".join(c for c in str(value) if " " <= c <= "~")
+    return text.strip()[:SPLASH_TITLE_MAX].strip()
 
 
 def config_dir() -> Path:

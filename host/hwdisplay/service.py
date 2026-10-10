@@ -9,12 +9,13 @@ import time
 
 import psutil
 
+from . import config
 from . import device as dev_mod
 from .layout import to_device, used_metrics
 from .sensors import Sensors
 
 RECONNECT_S = 2.0
-_ORDER = ("config", "layout", "page")
+_ORDER = ("config", "layout", "page", "splash")  # splash terakhir: memakai config baru
 
 
 def _headless_running() -> bool:
@@ -52,7 +53,7 @@ class Service(threading.Thread):
         self._used = set()  # metrik yang dipakai layout; hanya ini yang dikirim ke Pico
         # Dibuat di sini, bukan di thread, supaya katalog metrik langsung tersedia.
         self._sensors = Sensors(settings.get("gpu_index", 0))
-        self.set_config(settings["brightness"], settings["sleep_s"])
+        self.set_config(settings)
         self.set_layout(layout)
 
     # --- dipanggil dari thread GUI -------------------------------------
@@ -63,12 +64,22 @@ class Service(threading.Thread):
             self._used = used_metrics(msg["layout"])
         self._submit(msg, resend={**msg, "save": False})
 
-    def set_config(self, brightness: int, sleep_s: int):
-        msg = {"t": "config", "brightness": int(brightness), "sleep_s": int(sleep_s)}
+    def set_config(self, settings: dict):
+        msg = {
+            "t": "config",
+            "brightness": int(settings["brightness"]),
+            "sleep_s": int(settings["sleep_s"]),
+            "splash_ms": int(round(config.clean_splash_s(settings["splash_s"]) * 1000)),
+            "splash_title": config.clean_splash_title(settings["splash_title"]),
+        }
         self._submit(msg, resend=msg)
 
     def set_page(self, page: int):
         self._submit({"t": "page", "n": page})
+
+    def test_splash(self):
+        """Minta Pico menampilkan splash sekarang, dengan pengaturan terakhir."""
+        self._submit({"t": "splash"})
 
     def metrics(self) -> dict:
         return self._sensors.metrics()

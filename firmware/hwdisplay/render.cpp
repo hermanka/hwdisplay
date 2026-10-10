@@ -20,6 +20,7 @@
 #define ARC_SWEEP_DEG 270.0f
 #define ARC_STEP_DEG 4.0f
 #define GRAPH_STEP 2
+#define SPLASH_BAR_H 6
 
 static Adafruit_ST7789 tft(&TFT_SPI, PIN_TFT_CS, PIN_TFT_DC, PIN_TFT_RST);
 static uint8_t currentPage = 0;
@@ -263,6 +264,36 @@ void renderSetBacklight(uint8_t percent) {
 #else
   (void)percent;
 #endif
+}
+
+static int16_t splashBarX, splashBarY, splashBarW, splashBarFill;
+
+void renderSplash(const char* title, const char* subtitle) {
+  tft.setRotation(layout.rotation);
+  tft.fillScreen(layout.bg);
+  int16_t w = tft.width();
+  int16_t mid = tft.height() / 2;
+
+  // Font terbesar yang masih muat selebar layar.
+  uint8_t font = 5;
+  while (font > 1 && textWidth(fontFor(font), title) > w - 16) font--;
+  drawTextBox(tft, font, 0, mid - 50, w, 40, title, layout.fg, ALIGN_CENTER);
+  drawTextBox(tft, 2, 0, mid, w, 20, subtitle, layout.fg, ALIGN_CENTER);
+
+  splashBarW = w * 3 / 5;
+  splashBarX = (w - splashBarW) / 2;
+  splashBarY = mid + 40;
+  splashBarFill = 0;
+  tft.fillRect(splashBarX, splashBarY, splashBarW, SPLASH_BAR_H, layout.track);
+}
+
+void renderSplashProgress(uint8_t percent) {
+  int16_t fill = (int32_t)splashBarW * min((int)percent, 100) / 100;
+  if (fill <= splashBarFill) return;
+  // Hanya bagian yang baru terisi yang digambar.
+  tft.fillRect(splashBarX + splashBarFill, splashBarY, fill - splashBarFill,
+               SPLASH_BAR_H, layout.fg);
+  splashBarFill = fill;
 }
 
 void renderShowPage(uint8_t page) {

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import collections
+import ctypes
 import math
+import sys
 import time
 from dataclasses import dataclass
 
@@ -99,11 +101,23 @@ class _Nvidia:
             # Kipas dan daya memang tidak tersedia di sebagian GPU (mis. laptop).
             return None
 
+    def _memory(self, handle):
+        # Versi 2 memisahkan cadangan driver dari `used`, sehingga angkanya sama
+        # dengan Task Manager dan nvidia-smi. Driver atau pynvml lama hanya punya
+        # versi 1, yang menjumlahkan keduanya.
+        version = getattr(pynvml, "nvmlMemory_v2", None)
+        if version is not None:
+            try:
+                return pynvml.nvmlDeviceGetMemoryInfo(handle, version)
+            except (pynvml.NVMLError, TypeError):
+                pass
+        return self._query(pynvml.nvmlDeviceGetMemoryInfo, handle)
+
     def _read_one(self, handle) -> dict:
         util = self._query(pynvml.nvmlDeviceGetUtilizationRates, handle)
         temp = self._query(pynvml.nvmlDeviceGetTemperature, handle,
                            pynvml.NVML_TEMPERATURE_GPU)
-        mem = self._query(pynvml.nvmlDeviceGetMemoryInfo, handle)
+        mem = self._memory(handle)
         fan = self._query(pynvml.nvmlDeviceGetFanSpeed, handle)
         power = self._query(pynvml.nvmlDeviceGetPowerUsage, handle)
         out = dict.fromkeys(_GPU_FIELDS)
@@ -144,6 +158,61 @@ class _Nvidia:
             self._handles = []
 
 
+class _PdhValue(ctypes.Structure):
+    _fields_ = [("status", ctypes.c_ulong), ("value", ctypes.c_double)]
+
+
+class _WindowsCpu:
+    """Beban CPU seperti di Task Manager, lewat penghitung "% Processor Utility".
+
+    Angka itu ikut memperhitungkan kecepatan CPU (turbo), sehingga lebih tinggi
+    daripada persentase waktu sibuk yang dihitung psutil.
+    """
+
+    _PATH = r"\Processor Information(_Total)\% Processor Utility"
+    _FMT_DOUBLE = 0x00000200
+
+    def __init__(self):
+        self._query = ctypes.c_void_p()
+        self._counter = ctypes.c_void_p()
+        try:
+            pdh = self._pdh = ctypes.WinDLL("pdh")
+            pdh.PdhAddEnglishCounterW.argtypes = [
+                ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_void_p,
+                ctypes.POINTER(ctypes.c_void_p)]
+            pdh.PdhCollectQueryData.argtypes = [ctypes.c_void_p]
+            pdh.PdhGetFormattedCounterValue.argtypes = [
+                ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p,
+                ctypes.POINTER(_PdhValue)]
+            pdh.PdhCloseQuery.argtypes = [ctypes.c_void_p]
+            ok = (pdh.PdhOpenQueryW(None, None, ctypes.byref(self._query)) == 0
+                  and pdh.PdhAddEnglishCounterW(self._query, self._PATH, None,
+                                                ctypes.byref(self._counter)) == 0
+                  # Nilainya selisih dua pengambilan; ini yang pertama.
+                  and pdh.PdhCollectQueryData(self._query) == 0)
+        except (OSError, AttributeError):
+            ok = False
+        if not ok:
+            self.close()
+
+    def read(self):
+        """Persen beban sejak pembacaan sebelumnya, atau None bila tidak tersedia."""
+        if not self._query:
+            return None
+        out = _PdhValue()
+        if (self._pdh.PdhCollectQueryData(self._query) != 0
+                or self._pdh.PdhGetFormattedCounterValue(
+                    self._counter, self._FMT_DOUBLE, None, ctypes.byref(out)) != 0
+                or out.status != 0):
+            return None
+        return min(out.value, 100.0)
+
+    def close(self):
+        if self._query:
+            self._pdh.PdhCloseQuery(self._query)
+        self._query = ctypes.c_void_p()
+
+
 def _cpu_temp():
     read = getattr(psutil, "sensors_temperatures", None)  # tidak ada di Windows
     if read is None:
@@ -173,7 +242,14 @@ class Sensors:
         self._primary = primary_gpu
         self._nvidia = _Nvidia()
         self._nvidia.open()
+        self._win_cpu = _WindowsCpu() if sys.platform == "win32" else None
         psutil.cpu_percent(interval=None)  # panggilan pertama selalu 0.0
+
+    def _cpu_load(self):
+        load = self._win_cpu.read() if self._win_cpu else None
+        if load is None:  # Linux, atau penghitung Windows tidak tersedia
+            load = psutil.cpu_percent(interval=None)
+        return round(load, 1)
 
     @property
     def gpus(self) -> list:
@@ -231,7 +307,7 @@ class Sensors:
         """Nilai terbaru semua metrik; None berarti tidak tersedia."""
         mem = psutil.virtual_memory()
         values = {
-            "cpu.load": round(psutil.cpu_percent(interval=None), 1),
+            "cpu.load": self._cpu_load(),
             "cpu.temp": _cpu_temp(),
             "ram.pct": round(mem.percent, 1),
             "ram.used": round((mem.total - mem.available) / GIB, 1),
@@ -264,3 +340,5 @@ class Sensors:
 
     def close(self):
         self._nvidia.close()
+        if self._win_cpu:
+            self._win_cpu.close()

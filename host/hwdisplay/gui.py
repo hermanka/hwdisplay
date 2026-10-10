@@ -259,6 +259,12 @@ class App(tk.Tk):
                 self._push_config()
             return (lambda: self.settings[key]), set_
 
+        def splash_field(key, clean):
+            def set_(value):
+                self.settings[key] = clean(value)
+                self._push_config()
+            return (lambda: self.settings[key]), set_
+
         rows = [
             ("Rotasi", "rot", root_field("rot")),
             ("Ganti halaman tiap (dtk)", "int", root_field("page_time")),
@@ -269,11 +275,18 @@ class App(tk.Tk):
             ("Warna kritis", "color", root_field("crit_color")),
             ("Padam bila tanpa data (dtk)", "int", setting_field("sleep_s")),
             ("Interval kirim (dtk)", "float", setting_field("interval")),
+            ("Splash saat menyala (dtk)", "float",
+             splash_field("splash_s", config.clean_splash_s)),
+            ("Judul splash", "text",
+             splash_field("splash_title", config.clean_splash_title)),
         ]
         for row, (label, kind, (get, set_)) in enumerate(rows):
             self._editor(self.display_box, row, label, kind, get, set_)
 
         row = len(rows)
+        ttk.Button(self.display_box, text="Tes splash",
+                   command=self._test_splash).grid(row=row, column=1, sticky="e", pady=1)
+        row += 1
         ttk.Label(self.display_box, text="Kecerahan").grid(row=row, column=0, sticky="w")
         scale = ttk.Scale(self.display_box, from_=5, to=100,
                           command=self._on_brightness)
@@ -347,8 +360,15 @@ class App(tk.Tk):
         self.service.set_layout(self.layout, page=self.page, save=save)
 
     def _push_config(self):
-        self.service.set_config(self.settings["brightness"], self.settings["sleep_s"])
+        self.service.set_config(self.settings)
         self._debounce("settings", 1000, lambda: config.save_settings(self.settings))
+
+    def _test_splash(self):
+        if not self.service.snapshot()["connected"]:
+            messagebox.showwarning("HWDisplay", "Pico belum terhubung.", parent=self)
+            return
+        self._commit_focused()  # isian splash yang masih diketik ikut terkirim
+        self.service.test_splash()
 
     def _on_brightness(self, value):
         self.settings["brightness"] = int(float(value))

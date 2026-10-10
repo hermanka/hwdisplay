@@ -21,20 +21,32 @@
 #error "Pakai core 'Raspberry Pi Pico/RP2040' (Earle Philhower), bukan 'Arduino Mbed OS RP2040 Boards'."
 #endif
 
-#define FW_VERSION "0.1.0"
+#define FW_VERSION "0.2.0"
 #define DEVICE_NAME "hwdisplay"
 #define RX_LINE_MAX 16384
 #define STALE_MS 5000  // tanpa data selama ini, semua nilai ditampilkan "--"
 #define LAYOUT_PATH "/layout.json"
 #define CONFIG_PATH "/config.json"
 
+// Batas splash harus sama dengan host/hwdisplay/config.py.
+#define SPLASH_MAX_MS 10000
+#define SPLASH_TITLE_LEN 25  // 24 huruf + penutup
+#define SPLASH_TEST_MS 1500  // lama uji splash bila splash dimatikan (0)
+
 struct Settings {
   uint8_t brightness;  // persen
   uint16_t sleepS;     // layar padam setelah sekian detik tanpa pesan; 0 = tidak pernah
+  uint16_t splashMs;   // lama splash saat dinyalakan; 0 = tanpa splash
+  char splashTitle[SPLASH_TITLE_LEN];
 };
 
-static Settings settings = {80, 60};
+static Settings settings = {80, 60, SPLASH_DEFAULT_MS, SPLASH_DEFAULT_TITLE};
 static bool fsReady = false;
+
+static bool splashActive = false;
+static uint8_t splashPage = 0;  // halaman yang digambar setelah splash selesai
+static uint32_t splashStartMs = 0;
+static uint16_t splashDurationMs = 0;
 
 static char lineBuf[RX_LINE_MAX];
 static size_t lineLen = 0;
@@ -79,23 +91,55 @@ static void saveSettings() {
   JsonDocument doc;
   doc["brightness"] = settings.brightness;
   doc["sleep_s"] = settings.sleepS;
+  doc["splash_ms"] = settings.splashMs;
+  doc["splash_title"] = settings.splashTitle;
   saveJsonFile(CONFIG_PATH, doc.as<JsonVariantConst>());
 }
 
 static void applySettings(JsonVariantConst v) {
   settings.brightness = constrain(v["brightness"] | (int)settings.brightness, 0, 100);
   settings.sleepS = constrain(v["sleep_s"] | (int)settings.sleepS, 0, 65535);
+  settings.splashMs = constrain(v["splash_ms"] | (int)settings.splashMs, 0, SPLASH_MAX_MS);
+  if (v["splash_title"].is<const char*>()) {
+    strlcpy(settings.splashTitle, v["splash_title"].as<const char*>(),
+            sizeof(settings.splashTitle));
+  }
 }
 
 // --- halaman -------------------------------------------------------------
 
 static void showPage(uint8_t page) {
-  renderShowPage(page);
   pageSinceMs = millis();
+  if (splashActive) {
+    splashPage = page;  // digambar setelah splash selesai
+    return;
+  }
+  renderShowPage(page);
 }
 
 static void nextPage() {
   if (layout.pageCount > 1) showPage((renderCurrentPage() + 1) % layout.pageCount);
+}
+
+// --- splash --------------------------------------------------------------
+
+// Splash tidak menahan program: pesan dari PC tetap dibaca selama ia tampil.
+static void startSplash(uint8_t returnPage, uint16_t durationMs) {
+  splashActive = true;
+  splashPage = returnPage;
+  splashStartMs = millis();
+  splashDurationMs = durationMs;
+  renderSplash(settings.splashTitle, "v" FW_VERSION);
+}
+
+static void updateSplash() {
+  uint32_t elapsed = millis() - splashStartMs;
+  if (elapsed < splashDurationMs) {
+    renderSplashProgress(elapsed * 100 / splashDurationMs);
+    return;
+  }
+  splashActive = false;
+  showPage(splashPage);
 }
 
 // --- protokol ------------------------------------------------------------
@@ -135,6 +179,8 @@ static void handleHello() {
   doc["fs"] = fsReady;
   doc["brightness"] = settings.brightness;
   doc["sleep_s"] = settings.sleepS;
+  doc["splash_ms"] = settings.splashMs;
+  doc["splash_title"] = settings.splashTitle;
   sendJson(doc);
 }
 
@@ -186,6 +232,11 @@ static void handleLine(const char* line) {
     int page = doc["n"] | 0;
     if (page >= 0 && page < layout.pageCount) showPage(page);
     replyOk("page", false);
+  } else if (!strcmp(type, "splash")) {
+    // Uji dari editor: tampilkan splash sekarang, lalu kembali ke halaman semula.
+    replyOk("splash", false);
+    startSplash(splashActive ? splashPage : renderCurrentPage(),
+                settings.splashMs ? settings.splashMs : SPLASH_TEST_MS);
   } else {
     replyErr(type, "perintah tidak dikenal");
   }
@@ -254,8 +305,9 @@ void setup() {
   }
 
   renderBegin();
-  loadStartupLayout();
-  showPage(0);
+  loadStartupLayout();  // sebelum splash, supaya rotasi dan warnanya ikut layout
+  if (settings.splashMs > 0) startSplash(0, settings.splashMs);
+  else showPage(0);
   renderSetBacklight(settings.brightness);
   lastActivityMs = millis();
 }
@@ -265,6 +317,11 @@ void loop() {
 #if PIN_BUTTON >= 0
   pollButton();
 #endif
+
+  if (splashActive) {
+    updateSplash();
+    return;
+  }
 
   uint32_t now = millis();
 
