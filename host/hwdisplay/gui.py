@@ -655,14 +655,18 @@ class App(tk.Tk):
 
         if snap["connected"]:
             text = f"Terhubung: {snap['port']} (firmware {snap['info'].get('fw', '?')})"
+        elif snap["busy"]:
+            text = f"Port {snap['busy']} sedang dipakai program lain"
         else:
             text = "Mencari Pico…"
+        if snap["headless"]:
+            text += "   |   Mode headless masih berjalan, hentikan dulu"
         if snap["gpu_name"]:
             text += f"   |   GPU: {snap['gpu_name']}"
         if snap["error"]:
             text += f"   |   Galat: {snap['error']}"
-        self.status.config(text=text,
-                           foreground="#C0392B" if snap["error"] else "")
+        warn = snap["error"] or snap["busy"] or snap["headless"]
+        self.status.config(text=text, foreground="#C0392B" if warn else "")
         self.after(200, self._tick)
 
     def _on_close(self):

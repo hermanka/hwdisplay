@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import time
 
@@ -100,11 +101,26 @@ class Device:
             pass
 
 
-def connect(port=None):
-    """Device pertama yang menjawab handshake, atau None."""
+def _is_busy(exc) -> bool:
+    """Port ada, tetapi sedang dibuka program lain."""
+    if getattr(exc, "errno", None) == errno.EBUSY:
+        return True
+    # pyserial di Windows membungkus galatnya tanpa errno, hanya sebagai teks.
+    return "PermissionError" in str(exc)
+
+
+def connect(port=None, busy=None):
+    """Device pertama yang menjawab handshake, atau None.
+
+    Port yang sedang dipakai program lain ditambahkan ke list `busy` bila diberikan.
+    """
     for name in candidate_ports(port):
         try:
             return Device(name)
-        except (DeviceError, *LinkError):
+        except DeviceError:
+            continue
+        except LinkError as exc:
+            if busy is not None and _is_busy(exc):
+                busy.append(name)
             continue
     return None

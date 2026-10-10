@@ -84,7 +84,7 @@ def main():
         return
 
     layout = config.load_layout()
-    service = Service(settings, layout)
+    service = Service(settings, layout, watch_headless=not args.headless)
     if args.headless:
         run_headless(service)
         return

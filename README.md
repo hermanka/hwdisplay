@@ -100,31 +100,91 @@ Bila Pico dicolok tanpa program PC berjalan:
 ### Menjalankan otomatis saat login
 
 Supaya tidak perlu dijalankan manual, pasang mode `--headless` sebagai program startup.
-Ganti path di bawah dengan lokasi folder proyek Anda.
+Program mulai saat Anda login, bukan saat komputer menyala. Ganti path di bawah dengan
+lokasi folder proyek Anda.
 
 **Windows**
 
-1. Tekan `Win+R`, ketik `shell:startup`, Enter.
-2. Buat shortcut baru di folder itu dengan target:
+1. Tekan `Win+R`, ketik `shell:startup`, Enter. Folder Startup terbuka.
+2. Klik kanan di folder itu, pilih **New → Shortcut**, isi lokasinya dengan:
    ```
-   D:\GitProject\maximus-display\.venv\Scripts\pythonw.exe -m hwdisplay --headless
+   D:\GitProject\hwdisplay\.venv\Scripts\pythonw.exe -m hwdisplay --headless
    ```
-3. Buka Properties shortcut tersebut, isi **Start in** dengan
-   `D:\GitProject\maximus-display\host`.
+3. Beri nama, misalnya `HWDisplay`, lalu **Finish**.
+4. Klik kanan shortcut itu, pilih **Properties**, isi **Start in** dengan
+   `D:\GitProject\hwdisplay\host`.
 
-`pythonw.exe` menjalankan program tanpa jendela terminal.
+`pythonw.exe` menjalankan program tanpa jendela terminal. **Start in** wajib diisi:
+tanpa itu Python tidak menemukan modul `hwdisplay` dan program keluar tanpa pesan.
 
 **Linux**
 
-Tambahkan entri di "Startup Applications", atau file `.desktop` di
-`~/.config/autostart`, dengan perintah:
+Buat file `~/.config/autostart/hwdisplay.desktop`:
 
-```
-sh -c 'cd /path/ke/hwdisplay/host && ../.venv/bin/python -m hwdisplay --headless'
+```ini
+[Desktop Entry]
+Type=Application
+Name=HWDisplay
+Path=/home/NAMA/hwdisplay/host
+Exec=/home/NAMA/hwdisplay/.venv/bin/python -m hwdisplay --headless
 ```
 
-Hanya satu program yang bisa memakai port serial Pico pada satu waktu. Tutup program
-headless sebelum membuka editor, lalu jalankan lagi setelah selesai mengedit.
+Baris `Path` berfungsi seperti **Start in** di Windows. Akun Anda harus sudah masuk
+grup `dialout` (lihat di atas); tanpa itu program berjalan tetapi tidak bisa membuka
+port Pico.
+
+**Memeriksa**
+
+- Logout, login lagi, lalu lihat apakah angka muncul di Pico dalam beberapa detik.
+- Bila tidak muncul, jalankan perintah yang sama di terminal dengan `python` sebagai
+  ganti `pythonw` supaya pesan galatnya terlihat.
+- Untuk menonaktifkan autostart, hapus shortcut atau file `.desktop` tersebut.
+
+### Menghentikan program headless
+
+Program headless tidak punya jendela maupun ikon tray, jadi ia dihentikan dari luar.
+
+| Cara menjalankan | Windows | Linux |
+|---|---|---|
+| Dari terminal | `Ctrl+C` | `Ctrl+C` |
+| Di belakang layar | Task Manager → tab **Details** → `pythonw.exe` → **End task** | `pkill -f "hwdisplay --headless"` |
+
+Di Windows biasanya ada dua proses `pythonw.exe` untuk satu program, karena virtualenv
+memakai peluncur; akhiri keduanya. Bila ada program Python lain yang tidak boleh ikut
+mati, pakai PowerShell:
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" |
+  Where-Object CommandLine -like '*hwdisplay*' |
+  ForEach-Object { Stop-Process -Id $_.ProcessId }
+```
+
+Di Linux, tanpa terminal: buka **System Monitor**, cari proses `python` yang baris
+perintahnya memuat `hwdisplay`, lalu **End**.
+
+Menghentikan paksa aman: tidak ada file yang sedang ditulis dan port serial dilepas
+sendiri. Di Pico nilai menjadi `--`, lalu layar padam setelah 60 detik.
+
+### Mengubah layout saat headless berjalan
+
+Hanya satu program yang boleh memakai port serial Pico pada satu waktu, jadi hentikan
+program headless sebelum membuka editor:
+
+1. Hentikan program headless (lihat di atas).
+2. Buka editor, ubah layout, lalu klik **Simpan ke Pico**. Selama editor terbuka,
+   editor yang mengirim data ke Pico.
+3. Tutup editor, lalu jalankan headless lagi atau biarkan sampai login berikutnya.
+
+Bila editor dibuka saat headless masih berjalan:
+
+- **Windows:** editor terus menampilkan "Mencari Pico…" dan perubahan layout tidak
+  sampai ke Pico. Tidak ada yang rusak; editor tersambung sendiri sekitar 2 detik
+  setelah headless dihentikan.
+- **Linux:** kedua program bisa membuka port bersamaan dan saling mengganggu: tampilan
+  berganti-ganti dan muncul galat "Pico tidak menjawab".
+
+Program headless membaca `layout.json` hanya saat mulai, jadi layout baru dipakai
+setelah ia dijalankan ulang.
 
 ### Editor
 

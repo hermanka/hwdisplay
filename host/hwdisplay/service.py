@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
+
+import psutil
 
 from . import device as dev_mod
 from .layout import to_device, used_metrics
@@ -14,10 +17,28 @@ RECONNECT_S = 2.0
 _ORDER = ("config", "layout", "page")
 
 
+def _headless_running() -> bool:
+    """Ada proses `hwdisplay --headless` lain yang sedang berjalan."""
+    own = {os.getpid(), os.getppid()}  # induk: peluncur virtualenv di Windows
+    for proc in psutil.process_iter(["pid", "name"]):
+        if proc.info["pid"] in own or "python" not in (proc.info["name"] or "").lower():
+            continue
+        try:
+            cmdline = proc.cmdline()
+        except psutil.Error:
+            continue
+        if "hwdisplay" in cmdline and "--headless" in cmdline:
+            return True
+    return False
+
+
 class Service(threading.Thread):
-    def __init__(self, settings: dict, layout: dict):
+    def __init__(self, settings: dict, layout: dict, watch_headless: bool = False):
         super().__init__(daemon=True, name="hwdisplay-service")
         self.settings = settings
+        self._watch_headless = watch_headless  # hanya editor yang perlu memeriksa
+        self._headless = False
+        self._busy = None  # port Pico yang sedang dipakai program lain
         self._lock = threading.Lock()
         self._wake = threading.Event()
         self._stopping = threading.Event()
@@ -64,6 +85,8 @@ class Service(threading.Thread):
                 "values": dict(self._values),
                 "seq": self._seq,
                 "error": self._error,
+                "busy": self._busy,
+                "headless": self._headless,
                 "gpu_name": self._sensors.gpu_summary,
             }
 
@@ -115,11 +138,21 @@ class Service(threading.Thread):
         dev = None
         next_try = 0.0
         next_tick = 0.0
+        next_watch = 0.0
         while not self._stopping.is_set():
             now = time.monotonic()
+            if self._watch_headless and now >= next_watch:
+                headless = _headless_running()
+                next_watch = time.monotonic() + RECONNECT_S
+                with self._lock:
+                    self._headless = headless
+
             if dev is None and now >= next_try:
-                dev = dev_mod.connect(self.settings.get("port"))
+                busy = []
+                dev = dev_mod.connect(self.settings.get("port"), busy)
                 next_try = time.monotonic() + RECONNECT_S
+                with self._lock:
+                    self._busy = busy[0] if busy and dev is None else None
                 if dev is not None:
                     with self._lock:
                         self._info = dev.info
