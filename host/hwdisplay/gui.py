@@ -158,7 +158,41 @@ class App(tk.Tk):
         ttk.Button(buttons, text="Hapus", command=self._delete_widget).pack(side="left")
 
         self.prop_box = ttk.LabelFrame(right, text="Properti", padding=4)
-        self.prop_box.pack(fill="x")
+        self.prop_box.pack(fill="both", expand=True)
+
+        bg = ttk.Style().lookup("TFrame", "background") or self.cget("bg")
+        self.prop_canvas = tk.Canvas(self.prop_box, height=220, highlightthickness=0, bg=bg)
+        self.prop_scrollbar = ttk.Scrollbar(self.prop_box, orient="vertical",
+                                            command=self.prop_canvas.yview)
+        self.prop_inner = ttk.Frame(self.prop_canvas)
+
+        self._prop_win = self.prop_canvas.create_window((0, 0), window=self.prop_inner, anchor="nw")
+        self.prop_inner.bind(
+            "<Configure>",
+            lambda e: self.prop_canvas.configure(scrollregion=self.prop_canvas.bbox("all"))
+        )
+        self.prop_canvas.bind(
+            "<Configure>",
+            lambda e: self.prop_canvas.itemconfig(self._prop_win, width=e.width)
+        )
+        self.prop_canvas.configure(yscrollcommand=self.prop_scrollbar.set)
+
+        self.prop_canvas.pack(side="left", fill="both", expand=True)
+        self.prop_scrollbar.pack(side="right", fill="y")
+
+        def _on_mousewheel(event):
+            target = self.winfo_containing(event.x_root, event.y_root)
+            if target and str(target).startswith(str(self.prop_box)):
+                if event.num == 4:
+                    self.prop_canvas.yview_scroll(-2, "units")
+                elif event.num == 5:
+                    self.prop_canvas.yview_scroll(2, "units")
+                elif event.delta:
+                    self.prop_canvas.yview_scroll(int(-2 * (event.delta / 120)), "units")
+
+        self.bind_all("<MouseWheel>", _on_mousewheel)
+        self.bind_all("<Button-4>", _on_mousewheel)
+        self.bind_all("<Button-5>", _on_mousewheel)
 
     def _editor(self, parent, row, label, kind, get, set_):
         """Satu baris label + editor. Mengembalikan StringVar bila editornya teks."""
@@ -296,14 +330,15 @@ class App(tk.Tk):
         self._resize_canvas()
 
     def _build_props(self):
-        for child in self.prop_box.winfo_children():
+        for child in self.prop_inner.winfo_children():
             child.destroy()
         self._geom_vars = {}
         widget = self._selected()
         if widget is None:
-            ttk.Label(self.prop_box, text="Klik widget pada pratinjau untuk mengedit.\n"
+            ttk.Label(self.prop_inner, text="Klik widget pada pratinjau untuk mengedit.\n"
                       "Seret untuk memindah, seret sudut kanan-bawah\n"
                       "untuk mengubah ukuran.").grid()
+            self.prop_canvas.yview_moveto(0)
             return
 
         def field(key):
@@ -324,10 +359,11 @@ class App(tk.Tk):
                                        if k not in ("w", "h")]
         for row, key in enumerate(keys):
             label, kind = FIELDS[key]
-            var = self._editor(self.prop_box, row, label, kind, *field(key))
+            var = self._editor(self.prop_inner, row, label, kind, *field(key))
             if key in ("x", "y", "w", "h"):
                 self._geom_vars[key] = var
-        self.prop_box.columnconfigure(1, weight=1)
+        self.prop_inner.columnconfigure(1, weight=1)
+        self.prop_canvas.yview_moveto(0)
 
     # --- keadaan --------------------------------------------------------
 
